@@ -27,6 +27,19 @@ CFLAGS += -DVERSION=\"$(VERSION)\"
 LDFLAGS ?=
 VMNET_LDFLAGS = -framework vmnet
 
+# The shared-memory bus core is deliberately compiled into the daemon before
+# Shared-memory bus implementation linked into socket_vmnet.
+SHMEM_BUS_CORE_SOURCES = shmem_bus/control/region.c \
+	shmem_bus/control/msg.c \
+	shmem_bus/control/directory.c \
+	shmem_bus/control/client.c \
+	shmem_bus/c_ring/bus_ring.c
+SHMEM_BUS_CORE_OBJECTS = $(SHMEM_BUS_CORE_SOURCES:.c=.o)
+SHMEM_BUS_CORE_HEADERS = shmem_bus/include/bus_abi.h \
+	shmem_bus/include/bus_control.h \
+	shmem_bus/include/bus_client.h \
+	shmem_bus/c_ring/bus_ring.h
+
 # ARCH support arm64 and x86_64
 ARCH ?=
 
@@ -43,10 +56,13 @@ BRIDGED ?=
 
 all: socket_vmnet socket_vmnet_client
 
+
 %.o: %.c *.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
-socket_vmnet: $(patsubst %.c, %.o, $(wildcard *.c))
+$(SHMEM_BUS_CORE_OBJECTS): $(SHMEM_BUS_CORE_HEADERS)
+
+socket_vmnet: $(patsubst %.c, %.o, $(wildcard *.c)) $(SHMEM_BUS_CORE_OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $(LDFLAGS) $(VMNET_LDFLAGS) $^
 
 socket_vmnet_client: $(patsubst %.c, %.o, $(wildcard client/*.c))
@@ -124,7 +140,7 @@ uninstall: uninstall.launchd.plist uninstall.doc uninstall.bin uninstall.run
 
 .PHONY: clean
 clean:
-	rm -f socket_vmnet socket_vmnet_client *.o client/*.o
+	rm -f socket_vmnet socket_vmnet_client *.o client/*.o $(SHMEM_BUS_CORE_OBJECTS)
 
 define make_artifacts
 	$(MAKE) clean
