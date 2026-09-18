@@ -63,6 +63,10 @@ static void print_usage(const char *argv0) {
   printf("                                    The prefix must be a ULA i.e. "
          "start with fd00::/8.\n");
   printf("                                    (default: random)\n");
+  printf("--shmem-bus-control=PATH            join an external shared-memory bus\n"
+         "                                    coordinator as the vmnet uplink\n");
+  printf("--shmem-bus-listen=PATH             own the shared-memory bus coordinator\n"
+         "                                    at PATH and join it as vmnet uplink\n");
   printf("-p, --pidfile=PIDFILE               save pid to PIDFILE\n");
   printf("-h, --help                          display this help and exit\n");
   printf("-v, --version                       display version information and "
@@ -83,6 +87,8 @@ enum {
   CLI_OPT_VMNET_INTERFACE_ID,
   CLI_OPT_VMNET_NAT66_PREFIX,
   CLI_OPT_VMNET_NETWORK_IDENTIFIER,
+  CLI_OPT_SHMEM_BUS_CONTROL,
+  CLI_OPT_SHMEM_BUS_LISTEN,
 };
 
 struct cli_options *cli_options_parse(int argc, char *argv[]) {
@@ -102,6 +108,8 @@ struct cli_options *cli_options_parse(int argc, char *argv[]) {
       {"vmnet-interface-id",       required_argument, NULL, CLI_OPT_VMNET_INTERFACE_ID      },
       {"vmnet-nat66-prefix",       required_argument, NULL, CLI_OPT_VMNET_NAT66_PREFIX      },
       {"vmnet-network-identifier", required_argument, NULL, CLI_OPT_VMNET_NETWORK_IDENTIFIER},
+      {"shmem-bus-control",        required_argument, NULL, CLI_OPT_SHMEM_BUS_CONTROL       },
+      {"shmem-bus-listen",         required_argument, NULL, CLI_OPT_SHMEM_BUS_LISTEN        },
       {"pidfile",                  required_argument, NULL, 'p'                             },
       {"help",                     no_argument,       NULL, 'h'                             },
       {"version",                  no_argument,       NULL, 'v'                             },
@@ -152,6 +160,12 @@ struct cli_options *cli_options_parse(int argc, char *argv[]) {
         goto error;
       }
       break;
+    case CLI_OPT_SHMEM_BUS_CONTROL:
+      res->shmem_bus_control_path = strdup(optarg);
+      break;
+    case CLI_OPT_SHMEM_BUS_LISTEN:
+      res->shmem_bus_listen_path = strdup(optarg);
+      break;
     case 'p':
       res->pidfile = strdup(optarg);
       break;
@@ -172,6 +186,11 @@ struct cli_options *cli_options_parse(int argc, char *argv[]) {
     goto error;
   }
   res->socket_path = strdup(argv[optind]);
+
+  if (res->shmem_bus_control_path != NULL && res->shmem_bus_listen_path != NULL) {
+    ERROR("--shmem-bus-control and --shmem-bus-listen are mutually exclusive");
+    goto error;
+  }
 
   /* fill default */
   if (res->socket_group == NULL)
@@ -249,5 +268,7 @@ void cli_options_destroy(struct cli_options *x) {
   free(x->vmnet_mask);
   free(x->vmnet_nat66_prefix);
   free(x->pidfile);
+  free(x->shmem_bus_control_path);
+  free(x->shmem_bus_listen_path);
   free(x);
 }

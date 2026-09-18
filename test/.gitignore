@@ -1,2 +1,4 @@
 ipxe.lkrn
 *.log
+shmem_bus_smoke
+.shmem-bus-smoke.sock

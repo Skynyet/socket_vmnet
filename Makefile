@@ -23,21 +23,23 @@ VERSION ?= $(shell git describe --match 'v[0-9]*' --dirty='.m' --always --tags)
 VERSION_TRIMMED := $(VERSION:v%=%)
 
 CFLAGS += -DVERSION=\"$(VERSION)\"
+CFLAGS += -Ishmem_bus/include -Ishmem_bus/c_ring
 
 LDFLAGS ?=
 VMNET_LDFLAGS = -framework vmnet
 
-# The shared-memory bus core is deliberately compiled into the daemon before
-# Shared-memory bus implementation linked into socket_vmnet.
+# Shared-memory bus control and data-plane core, embedded into the daemon.
 SHMEM_BUS_CORE_SOURCES = shmem_bus/control/region.c \
 	shmem_bus/control/msg.c \
 	shmem_bus/control/directory.c \
 	shmem_bus/control/client.c \
+	shmem_bus/control/coordinator.c \
 	shmem_bus/c_ring/bus_ring.c
 SHMEM_BUS_CORE_OBJECTS = $(SHMEM_BUS_CORE_SOURCES:.c=.o)
 SHMEM_BUS_CORE_HEADERS = shmem_bus/include/bus_abi.h \
 	shmem_bus/include/bus_control.h \
 	shmem_bus/include/bus_client.h \
+	shmem_bus/include/bus_coordinator.h \
 	shmem_bus/c_ring/bus_ring.h
 
 # ARCH support arm64 and x86_64
@@ -67,6 +69,13 @@ socket_vmnet: $(patsubst %.c, %.o, $(wildcard *.c)) $(SHMEM_BUS_CORE_OBJECTS)
 
 socket_vmnet_client: $(patsubst %.c, %.o, $(wildcard client/*.c))
 	$(CC) $(CFLAGS) -o $@ $(LDFLAGS) $^
+
+test/shmem_bus_smoke: test/shmem_bus_smoke.c shmem_bus_coordinator.o $(SHMEM_BUS_CORE_OBJECTS)
+	$(CC) $(CFLAGS) -I. -o $@ $(LDFLAGS) $^
+
+.PHONY: test.shmem-bus
+test.shmem-bus: test/shmem_bus_smoke
+	./test/shmem_bus_smoke ./test/.shmem-bus-smoke.sock
 
 install.bin: socket_vmnet socket_vmnet_client
 	logger "Installing executables for socket_vmnet $(VERSION) in $(DESTDIR)/$(PREFIX)/bin"
@@ -140,7 +149,8 @@ uninstall: uninstall.launchd.plist uninstall.doc uninstall.bin uninstall.run
 
 .PHONY: clean
 clean:
-	rm -f socket_vmnet socket_vmnet_client *.o client/*.o $(SHMEM_BUS_CORE_OBJECTS)
+	rm -f socket_vmnet socket_vmnet_client *.o client/*.o $(SHMEM_BUS_CORE_OBJECTS) \
+		test/shmem_bus_smoke test/.shmem-bus-smoke.sock
 
 define make_artifacts
 	$(MAKE) clean

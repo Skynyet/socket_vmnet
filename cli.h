@@ -26,6 +26,10 @@ struct cli_options {
   char *vmnet_nat66_prefix;
   // -p, --pidfile; writes pidfile using permissions of socket_vmnet
   char *pidfile;
+  // Join an external coordinator as its vmnet uplink (compatibility).
+  char *shmem_bus_control_path;
+  // Own the coordinator at this path and join it as the vmnet uplink.
+  char *shmem_bus_listen_path;
   // arg
   char *socket_path;
 };

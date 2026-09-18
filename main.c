@@ -17,6 +17,8 @@
 
 #include "cli.h"
 #include "log.h"
+#include "shmem_bus_coordinator.h"
+#include "shmem_bus_uplink.h"
 
 #if __MAC_OS_X_VERSION_MAX_ALLOWED < 101500
 #error "Requires macOS 10.15 or later"
@@ -83,6 +85,9 @@ struct state {
   dispatch_queue_t vms_queue;
   dispatch_queue_t host_queue;
   struct conn *conns; // TODO: avoid O(N) lookup
+  // Optional in-process participant which bridges the shared-memory fabric to
+  // vmnet.framework. Only host_queue publishes through this pointer.
+  struct shmem_bus_uplink *bus_uplink;
 } _state;
 
 static void state_add_socket_fd(struct state *state, int socket_fd) {
@@ -149,6 +154,11 @@ static void _on_vmnet_packets_available(interface_ref iface, int64_t buf_count, 
   if (read_status != VMNET_SUCCESS) {
     ERRORF("vmnet_read: [%d] %s", read_status, vmnet_strerror(read_status));
     goto done;
+  }
+
+  if (state->bus_uplink != NULL &&
+      shmem_bus_uplink_publish(state->bus_uplink, pdv, received_count) < 0) {
+    ERROR("shmem bus: could not publish vmnet batch");
   }
 
   DEBUGF("Received from VMNET: %d packets (buffer was prepared for %lld packets)", received_count,
@@ -430,6 +440,7 @@ int main(int argc, char *argv[]) {
   int pidfile_fd = -1;
   int kq = -1;
   __block interface_ref iface = NULL;
+  struct shmem_bus_coordinator *bus_coordinator = NULL;
 
   struct state state = {0};
 
@@ -479,10 +490,34 @@ int main(int argc, char *argv[]) {
   state.host_queue =
       dispatch_queue_create("io.github.lima-vm.socket_vmnet.host", DISPATCH_QUEUE_SERIAL);
 
+  if (cliopt->shmem_bus_listen_path != NULL &&
+      shmem_bus_coordinator_open(&bus_coordinator, cliopt->shmem_bus_listen_path,
+                                 cliopt->socket_group) < 0) {
+    ERRORF("shmem bus: could not start daemon-owned coordinator at %s: %s",
+           cliopt->shmem_bus_listen_path, strerror(errno));
+    goto done;
+  }
+
   iface = start(&state, cliopt);
   if (iface == NULL) {
     // Error already logged.
     goto done;
+  }
+
+  const char *bus_control_path = cliopt->shmem_bus_listen_path != NULL
+                                     ? cliopt->shmem_bus_listen_path
+                                     : cliopt->shmem_bus_control_path;
+  if (bus_control_path != NULL) {
+    struct shmem_bus_uplink *uplink = NULL;
+    if (shmem_bus_uplink_open(&uplink, bus_control_path, iface) < 0) {
+      ERRORF("shmem bus: could not join coordinator at %s: %s", bus_control_path,
+             strerror(errno));
+      goto done;
+    }
+    struct state *state_p = &state;
+    dispatch_sync(state.host_queue, ^{
+      state_p->bus_uplink = uplink;
+    });
   }
 
   if (add_listen_fd(kq, listen_fd)) {
@@ -517,6 +552,19 @@ int main(int argc, char *argv[]) {
   rc = 0;
 done:
   DEBUGF("shutting down with rc=%d", rc);
+  if (state.bus_uplink != NULL) {
+    struct shmem_bus_uplink *uplink = state.bus_uplink;
+    struct state *state_p = &state;
+    dispatch_sync(state.host_queue, ^{
+      state_p->bus_uplink = NULL;
+    });
+    // The consumer can still be inside vmnet_write(), so keep iface alive
+    // until the participant thread has stopped.
+    shmem_bus_uplink_close(uplink);
+  }
+  if (bus_coordinator != NULL) {
+    shmem_bus_coordinator_close(bus_coordinator);
+  }
   if (iface != NULL) {
     stop(&state, iface);
   }

@@ -318,6 +318,25 @@ See also https://github.com/lima-vm/lima/blob/master/docs/network.md
 
 ## Advanced usage
 
+### Shared-memory bus (experimental)
+
+`--shmem-bus-listen=PATH` makes `socket_vmnet` own the shared-memory bus
+coordinator and join that bus as its vmnet uplink. Lima VZ guests configured
+with the same control path then exchange Ethernet payload through shared
+memory; the Unix socket at `PATH` carries only control-plane messages and file
+descriptors.
+
+```console
+sudo socket_vmnet \
+  --shmem-bus-listen=/var/run/socket_vmnet.shmbus \
+  /var/run/socket_vmnet
+LIMA_VZ_SHMEM_BUS_CONTROL=/var/run/socket_vmnet.shmbus limactl start default
+```
+
+`--shmem-bus-control=PATH` retains the external-coordinator compatibility mode in which an
+external coordinator already owns `PATH`; it makes this daemon join that bus
+only as the vmnet uplink. The two options are mutually exclusive.
+
 ### Multi VM
 
 Multiple VMs can be connected to a single `socket_vmnet` instance.
