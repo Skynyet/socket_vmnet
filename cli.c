@@ -161,20 +161,28 @@ struct cli_options *cli_options_parse(int argc, char *argv[]) {
         goto error;
       }
       break;
-    case CLI_OPT_VMNET_MTU:
-      errno = 0;
-      res->vmnet_mtu = (int)strtol(optarg, NULL, 10);
+    case CLI_OPT_VMNET_MTU: {
       // 68 is IPv4's minimum reassembly buffer and what a virtio-net guest
       // reports as its own minimum; 65535 is where an Ethernet MTU stops
       // meaning anything. Between those, do not guess: vmnet.h states no range
       // for vmnet_mtu_key, a smaller MTU is a legitimate thing to ask for when
       // testing path-MTU discovery or a constrained link, and a value vmnet
       // dislikes is refused by vmnet.
-      if (errno != 0 || res->vmnet_mtu < 68 || res->vmnet_mtu > 65535) {
-        fprintf(stderr, "--vmnet-mtu must be between 68 and 65535\n");
+      //
+      // strtol stops at the first character it cannot use and says where in
+      // endptr. Without looking, "--vmnet-mtu=9000nonsense" is accepted as
+      // 9000: a typo that silently configures a segment instead of failing.
+      errno = 0;
+      char *endptr = NULL;
+      long mtu = strtol(optarg, &endptr, 10);
+      if (errno != 0 || endptr == optarg || *endptr != '\0' || mtu < 68 ||
+          mtu > 65535) {
+        fprintf(stderr, "--vmnet-mtu must be an integer between 68 and 65535\n");
         goto error;
       }
+      res->vmnet_mtu = (int)mtu;
       break;
+    }
     case CLI_OPT_VMNET_NAT66_PREFIX:
       res->vmnet_nat66_prefix = strdup(optarg);
       break;
