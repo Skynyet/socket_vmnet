@@ -253,6 +253,17 @@ static interface_ref start(struct state *state, struct cli_options *cliopt) {
 
   xpc_dictionary_set_uuid(dict, vmnet_interface_id_key, cliopt->vmnet_interface_id);
 
+  // vmnet accepts a requested MTU in shared and host modes, but rejects it in
+  // bridged mode. Set it here so the vmnet interface and its bridge agree.
+  if (cliopt->vmnet_mtu > 0) {
+    if (cliopt->vmnet_mode == VMNET_BRIDGED_MODE) {
+      ERROR("--vmnet-mtu is rejected by vmnet in bridged mode");
+      return NULL;
+    }
+    INFOF("Requesting vmnet MTU %d", cliopt->vmnet_mtu);
+    xpc_dictionary_set_uint64(dict, vmnet_mtu_key, (uint64_t)cliopt->vmnet_mtu);
+  }
+
   if (cliopt->vmnet_nat66_prefix != NULL) {
     xpc_dictionary_set_string(dict, vmnet_nat66_prefix_key, cliopt->vmnet_nat66_prefix);
   }

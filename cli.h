@@ -24,6 +24,11 @@ struct cli_options {
   uuid_t vmnet_network_identifier;
   // --vmnet-nat66-prefix, corresponds to vmnet_nat66_prefix_key
   char *vmnet_nat66_prefix;
+  // --vmnet-mtu=BYTES, corresponds to vmnet_mtu_key. Shared and host modes
+  // only; vmnet rejects it in bridged mode. 0 means do not ask, which leaves
+  // the interface and its bridge at vmnet's default of 1500. vmnet.h states no
+  // range, so neither do we beyond what an Ethernet MTU can mean at all.
+  int vmnet_mtu;
   // -p, --pidfile; writes pidfile using permissions of socket_vmnet
   char *pidfile;
   // Join an external coordinator as its vmnet uplink (compatibility).

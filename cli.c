@@ -63,6 +63,14 @@ static void print_usage(const char *argv0) {
   printf("                                    The prefix must be a ULA i.e. "
          "start with fd00::/8.\n");
   printf("                                    (default: random)\n");
+  printf("--vmnet-mtu=BYTES                   Ask vmnet for this MTU. Shared and "
+         "host modes\n");
+  printf("                                    only; vmnet rejects it in bridged "
+         "mode.\n");
+  printf("                                    Raises the vmnet interface and its "
+         "bridge\n");
+  printf("                                    together. 68-65535.\n");
+  printf("                                    (default: unset, vmnet uses 1500)\n");
   printf("--shmem-bus-control=PATH            join an external shared-memory bus\n"
          "                                    coordinator as the vmnet uplink\n");
   printf("--shmem-bus-listen=PATH             own the shared-memory bus coordinator\n"
@@ -86,6 +94,7 @@ enum {
   CLI_OPT_VMNET_MASK,
   CLI_OPT_VMNET_INTERFACE_ID,
   CLI_OPT_VMNET_NAT66_PREFIX,
+  CLI_OPT_VMNET_MTU,
   CLI_OPT_VMNET_NETWORK_IDENTIFIER,
   CLI_OPT_SHMEM_BUS_CONTROL,
   CLI_OPT_SHMEM_BUS_LISTEN,
@@ -107,6 +116,7 @@ struct cli_options *cli_options_parse(int argc, char *argv[]) {
       {"vmnet-mask",               required_argument, NULL, CLI_OPT_VMNET_MASK              },
       {"vmnet-interface-id",       required_argument, NULL, CLI_OPT_VMNET_INTERFACE_ID      },
       {"vmnet-nat66-prefix",       required_argument, NULL, CLI_OPT_VMNET_NAT66_PREFIX      },
+      {"vmnet-mtu",                required_argument, NULL, CLI_OPT_VMNET_MTU               },
       {"vmnet-network-identifier", required_argument, NULL, CLI_OPT_VMNET_NETWORK_IDENTIFIER},
       {"shmem-bus-control",        required_argument, NULL, CLI_OPT_SHMEM_BUS_CONTROL       },
       {"shmem-bus-listen",         required_argument, NULL, CLI_OPT_SHMEM_BUS_LISTEN        },
@@ -148,6 +158,20 @@ struct cli_options *cli_options_parse(int argc, char *argv[]) {
     case CLI_OPT_VMNET_INTERFACE_ID:
       if (uuid_parse(optarg, res->vmnet_interface_id) < 0) {
         ERRORF("Failed to parse UUID \"%s\"", optarg);
+        goto error;
+      }
+      break;
+    case CLI_OPT_VMNET_MTU:
+      errno = 0;
+      res->vmnet_mtu = (int)strtol(optarg, NULL, 10);
+      // 68 is IPv4's minimum reassembly buffer and what a virtio-net guest
+      // reports as its own minimum; 65535 is where an Ethernet MTU stops
+      // meaning anything. Between those, do not guess: vmnet.h states no range
+      // for vmnet_mtu_key, a smaller MTU is a legitimate thing to ask for when
+      // testing path-MTU discovery or a constrained link, and a value vmnet
+      // dislikes is refused by vmnet.
+      if (errno != 0 || res->vmnet_mtu < 68 || res->vmnet_mtu > 65535) {
+        fprintf(stderr, "--vmnet-mtu must be between 68 and 65535\n");
         goto error;
       }
       break;
