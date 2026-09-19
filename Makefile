@@ -73,6 +73,13 @@ socket_vmnet_client: $(patsubst %.c, %.o, $(wildcard client/*.c))
 test/shmem_bus_smoke: test/shmem_bus_smoke.c shmem_bus_coordinator.o $(SHMEM_BUS_CORE_OBJECTS)
 	$(CC) $(CFLAGS) -I. -o $@ $(LDFLAGS) $^
 
+test/cli_mtu: test/cli_mtu.c cli.o
+	$(CC) $(CFLAGS) -I. -o $@ $(LDFLAGS) $(VMNET_LDFLAGS) $^
+
+.PHONY: test.cli-mtu
+test.cli-mtu: test/cli_mtu
+	./test/cli_mtu
+
 .PHONY: test.shmem-bus
 test.shmem-bus: test/shmem_bus_smoke
 	./test/shmem_bus_smoke ./test/.shmem-bus-smoke.sock
@@ -150,7 +157,7 @@ uninstall: uninstall.launchd.plist uninstall.doc uninstall.bin uninstall.run
 .PHONY: clean
 clean:
 	rm -f socket_vmnet socket_vmnet_client *.o client/*.o $(SHMEM_BUS_CORE_OBJECTS) \
-		test/shmem_bus_smoke test/.shmem-bus-smoke.sock
+		test/shmem_bus_smoke test/cli_mtu test/.shmem-bus-smoke.sock
 
 define make_artifacts
 	$(MAKE) clean
