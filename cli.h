@@ -35,6 +35,9 @@ struct cli_options {
   char *shmem_bus_control_path;
   // Own the coordinator at this path and join it as the vmnet uplink.
   char *shmem_bus_listen_path;
+  // Published bus MTU. With daemon ownership this must equal the effective
+  // vmnet MTU; 0 during parsing means derive it from --vmnet-mtu/default 1500.
+  int shmem_bus_mtu;
   // arg
   char *socket_path;
 };

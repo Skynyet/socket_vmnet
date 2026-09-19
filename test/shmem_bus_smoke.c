@@ -8,7 +8,7 @@
 int main(int argc, char **argv) {
   if (argc != 2) { return 2; }
   struct shmem_bus_coordinator *coordinator = NULL;
-  if (shmem_bus_coordinator_open(&coordinator, argv[1], NULL) < 0) {
+  if (shmem_bus_coordinator_open(&coordinator, argv[1], NULL, 9000) < 0) {
     perror("coordinator open");
     return 1;
   }
@@ -23,6 +23,14 @@ int main(int argc, char **argv) {
   }
   if (bus_client_join(&client, argv[1], 0, BUS_PORT_FLAG_UPLINK, 5000) < 0) {
     perror("client join");
+    shmem_bus_coordinator_close(coordinator);
+    return 1;
+  }
+  const struct bus_region_prefix *prefix = client.own_data;
+  if (prefix == NULL || prefix->mtu != 9000) {
+    fprintf(stderr, "coordinator published MTU %u, want 9000\n",
+            prefix == NULL ? 0 : prefix->mtu);
+    bus_client_close(&client);
     shmem_bus_coordinator_close(coordinator);
     return 1;
   }

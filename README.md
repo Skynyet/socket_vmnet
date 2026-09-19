@@ -328,10 +328,17 @@ descriptors.
 
 ```console
 sudo socket_vmnet \
+  --vmnet-mtu=9000 \
   --shmem-bus-listen=/var/run/socket_vmnet.shmbus \
   /var/run/socket_vmnet
 LIMA_VZ_SHMEM_BUS_CONTROL=/var/run/socket_vmnet.shmbus limactl start default
 ```
+
+In daemon-owned mode the coordinator publishes the effective vmnet MTU: 1500
+when `--vmnet-mtu` is omitted, otherwise the requested value. The optional
+`--shmem-bus-mtu` spelling is accepted for explicit configuration auditing, but
+must match the effective vmnet MTU; a mismatch is rejected before either
+interface starts.
 
 `--shmem-bus-control=PATH` retains the external-coordinator compatibility mode in which an
 external coordinator already owns `PATH`; it makes this daemon join that bus

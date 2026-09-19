@@ -36,7 +36,7 @@ static void *coordinator_thread_main(void *opaque) {
 }
 
 int shmem_bus_coordinator_open(struct shmem_bus_coordinator **out, const char *path,
-                               const char *socket_group) {
+                               const char *socket_group, uint32_t mtu) {
   if (out == NULL || path == NULL || path[0] == '\0') {
     errno = EINVAL;
     return -1;
@@ -45,7 +45,7 @@ int shmem_bus_coordinator_open(struct shmem_bus_coordinator **out, const char *p
   struct shmem_bus_coordinator *coordinator = calloc(1, sizeof(*coordinator));
   if (coordinator == NULL) { return -1; }
 
-  if (bus_coordinator_open(&coordinator->core, path) < 0) {
+  if (bus_coordinator_open(&coordinator->core, path, mtu) < 0) {
     free(coordinator);
     return -1;
   }

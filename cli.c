@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -75,6 +76,8 @@ static void print_usage(const char *argv0) {
          "                                    coordinator as the vmnet uplink\n");
   printf("--shmem-bus-listen=PATH             own the shared-memory bus coordinator\n"
          "                                    at PATH and join it as vmnet uplink\n");
+  printf("--shmem-bus-mtu=BYTES               coordinator MTU; must match vmnet MTU\n"
+         "                                    (default: effective vmnet MTU)\n");
   printf("-p, --pidfile=PIDFILE               save pid to PIDFILE\n");
   printf("-h, --help                          display this help and exit\n");
   printf("-v, --version                       display version information and "
@@ -98,7 +101,20 @@ enum {
   CLI_OPT_VMNET_NETWORK_IDENTIFIER,
   CLI_OPT_SHMEM_BUS_CONTROL,
   CLI_OPT_SHMEM_BUS_LISTEN,
+  CLI_OPT_SHMEM_BUS_MTU,
 };
+
+static int parse_mtu(const char *name, const char *text, int *out) {
+  errno = 0;
+  char *end = NULL;
+  long value = strtol(text, &end, 10);
+  if (errno != 0 || end == text || *end != '\0' || value < 68 || value > 65535) {
+    ERRORF("%s must be an integer between 68 and 65535", name);
+    return -1;
+  }
+  *out = (int)value;
+  return 0;
+}
 
 struct cli_options *cli_options_parse(int argc, char *argv[]) {
   struct cli_options *res = calloc(1, sizeof(*res));
@@ -120,6 +136,7 @@ struct cli_options *cli_options_parse(int argc, char *argv[]) {
       {"vmnet-network-identifier", required_argument, NULL, CLI_OPT_VMNET_NETWORK_IDENTIFIER},
       {"shmem-bus-control",        required_argument, NULL, CLI_OPT_SHMEM_BUS_CONTROL       },
       {"shmem-bus-listen",         required_argument, NULL, CLI_OPT_SHMEM_BUS_LISTEN        },
+      {"shmem-bus-mtu",            required_argument, NULL, CLI_OPT_SHMEM_BUS_MTU           },
       {"pidfile",                  required_argument, NULL, 'p'                             },
       {"help",                     no_argument,       NULL, 'h'                             },
       {"version",                  no_argument,       NULL, 'v'                             },
@@ -198,6 +215,9 @@ struct cli_options *cli_options_parse(int argc, char *argv[]) {
     case CLI_OPT_SHMEM_BUS_LISTEN:
       res->shmem_bus_listen_path = strdup(optarg);
       break;
+    case CLI_OPT_SHMEM_BUS_MTU:
+      if (parse_mtu("--shmem-bus-mtu", optarg, &res->shmem_bus_mtu) < 0) { goto error; }
+      break;
     case 'p':
       res->pidfile = strdup(optarg);
       break;
@@ -223,12 +243,25 @@ struct cli_options *cli_options_parse(int argc, char *argv[]) {
     ERROR("--shmem-bus-control and --shmem-bus-listen are mutually exclusive");
     goto error;
   }
+  if (res->shmem_bus_mtu != 0 && res->shmem_bus_listen_path == NULL) {
+    ERROR("--shmem-bus-mtu requires --shmem-bus-listen");
+    goto error;
+  }
 
   /* fill default */
   if (res->socket_group == NULL)
     res->socket_group = strdup(CLI_DEFAULT_SOCKET_GROUP); /* use strdup to make it freeable */
   if (res->vmnet_mode == 0)
     res->vmnet_mode = VMNET_SHARED_MODE;
+  if (res->shmem_bus_listen_path != NULL) {
+    int effective_vmnet_mtu = res->vmnet_mtu != 0 ? res->vmnet_mtu : 1500;
+    if (res->shmem_bus_mtu == 0) {
+      res->shmem_bus_mtu = effective_vmnet_mtu;
+    } else if (res->shmem_bus_mtu != effective_vmnet_mtu) {
+      ERROR("--shmem-bus-mtu must match the effective --vmnet-mtu");
+      goto error;
+    }
+  }
   if (res->vmnet_gateway != NULL && res->vmnet_dhcp_end == NULL) {
     /* Set default vmnet_dhcp_end to XXX.XXX.XXX.254 (only when --vmnet-gateway
      * is specified) */
@@ -257,6 +290,10 @@ struct cli_options *cli_options_parse(int argc, char *argv[]) {
   /* validate */
   if (res->vmnet_mode == VMNET_BRIDGED_MODE && res->vmnet_interface == NULL) {
     ERROR("vmnet mode \"bridged\" require --vmnet-interface to be specified");
+    goto error;
+  }
+  if (res->vmnet_mode == VMNET_BRIDGED_MODE && res->vmnet_mtu != 0) {
+    ERROR("--vmnet-mtu is not supported in bridged mode");
     goto error;
   }
   if (res->vmnet_gateway == NULL) {

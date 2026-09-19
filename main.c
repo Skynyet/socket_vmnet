@@ -263,7 +263,6 @@ static interface_ref start(struct state *state, struct cli_options *cliopt) {
     INFOF("Requesting vmnet MTU %d", cliopt->vmnet_mtu);
     xpc_dictionary_set_uint64(dict, vmnet_mtu_key, (uint64_t)cliopt->vmnet_mtu);
   }
-
   if (cliopt->vmnet_nat66_prefix != NULL) {
     xpc_dictionary_set_string(dict, vmnet_nat66_prefix_key, cliopt->vmnet_nat66_prefix);
   }
@@ -503,7 +502,7 @@ int main(int argc, char *argv[]) {
 
   if (cliopt->shmem_bus_listen_path != NULL &&
       shmem_bus_coordinator_open(&bus_coordinator, cliopt->shmem_bus_listen_path,
-                                 cliopt->socket_group) < 0) {
+                                 cliopt->socket_group, (uint32_t)cliopt->shmem_bus_mtu) < 0) {
     ERRORF("shmem bus: could not start daemon-owned coordinator at %s: %s",
            cliopt->shmem_bus_listen_path, strerror(errno));
     goto done;

@@ -5,6 +5,8 @@
 #ifndef BUS_COORDINATOR_H
 #define BUS_COORDINATOR_H
 
+#include <stdint.h>
+
 struct bus_coordinator;
 
 // Creates all coordinator-owned regions and binds/listens on `socket_path`
@@ -12,7 +14,7 @@ struct bus_coordinator;
 // participant may connect as soon as this call succeeds.  The caller owns the
 // returned object and must not call poll concurrently from more than one
 // thread.
-int bus_coordinator_open(struct bus_coordinator **out, const char *socket_path);
+int bus_coordinator_open(struct bus_coordinator **out, const char *socket_path, uint32_t mtu);
 
 // Runs one control-plane poll step. `max_wait_ms` bounds this call even when
 // the coordinator's own liveness cadence is longer. Returns 0 on a completed

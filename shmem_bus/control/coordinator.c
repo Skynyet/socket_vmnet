@@ -601,8 +601,8 @@ static int listen_on(const char *path) {
   return fd;
 }
 
-int bus_coordinator_open(struct bus_coordinator **out, const char *path) {
-  if (out == NULL || path == NULL || path[0] == '\0') {
+int bus_coordinator_open(struct bus_coordinator **out, const char *path, uint32_t mtu) {
+  if (out == NULL || path == NULL || path[0] == '\0' || mtu < 68 || mtu > 65535) {
     errno = EINVAL;
     return -1;
   }
@@ -618,7 +618,7 @@ int bus_coordinator_open(struct bus_coordinator **out, const char *path) {
   c->socket_path = strdup(path);
   c->capacity = BUS_DEFAULT_CAPACITY;
   c->slot_bytes = BUS_DEFAULT_SLOT_BYTES;
-  c->mtu = BUS_DEFAULT_MTU;
+  c->mtu = mtu;
   c->join_deadline_ms = 2000;
   c->claim_deadline_ms = 2000;
   c->claim_poll_ms = 250;
