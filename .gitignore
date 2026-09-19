@@ -1,4 +1,7 @@
 /socket_vmnet
 /socket_vmnet_client
 *.o
+/test/cli_mtu
+/test/frame_read
+/test/shmem_bus_smoke
 _artifacts*

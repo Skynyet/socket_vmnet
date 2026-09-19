@@ -73,6 +73,55 @@ static ssize_t read_exact(int fd, void *buf, size_t len) {
   return (ssize_t)offset;
 }
 
+// Outcome of reading one framed packet from a socket.
+typedef enum {
+  FRAME_READ_OK = 0,    // *frame_len holds the body length, buf holds the body
+  FRAME_READ_EOF,       // peer closed cleanly between frames
+  FRAME_READ_IOERR,     // read() failed; errno is set
+  FRAME_READ_TRUNCATED, // peer closed mid-header or mid-body
+  FRAME_READ_INVALID,   // declared frame size is zero or larger than buf_len
+} frame_read_status_t;
+
+// Read one framed packet: a four-byte big-endian body length followed by the
+// body. The length and body are accumulated across as many read() calls as the
+// stream delivers. On anything other than FRAME_READ_OK the connection must be
+// closed by the caller.
+static frame_read_status_t read_frame(int fd, uint8_t *buf, size_t buf_len, size_t *frame_len) {
+  uint32_t header_be = 0;
+  ssize_t header_received = read_exact(fd, &header_be, sizeof(header_be));
+  if (header_received < 0) {
+    ERRORN("read[header]");
+    return FRAME_READ_IOERR;
+  }
+  if (header_received == 0) {
+    // EOF according to man page of read.
+    INFOF("Connection closed by peer (fd %d)", fd);
+    return FRAME_READ_EOF;
+  }
+  if ((size_t)header_received != sizeof(header_be)) {
+    ERRORF("Connection closed mid-frame header (fd %d, received %ld of %zu bytes)", fd,
+           header_received, sizeof(header_be));
+    return FRAME_READ_TRUNCATED;
+  }
+  uint32_t header = ntohl(header_be);
+  if (header == 0 || header > buf_len) {
+    ERRORF("Invalid frame size %u from fd %d (maximum %zu)", header, fd, buf_len);
+    return FRAME_READ_INVALID;
+  }
+  ssize_t received = read_exact(fd, buf, header);
+  if (received < 0) {
+    ERRORN("read[body]");
+    return FRAME_READ_IOERR;
+  }
+  if ((size_t)received != header) {
+    ERRORF("Connection closed mid-frame body (fd %d, received %ld of %u bytes)", fd, received,
+           header);
+    return FRAME_READ_TRUNCATED;
+  }
+  *frame_len = header;
+  return FRAME_READ_OK;
+}
+
 static void print_vmnet_start_param(xpc_object_t param) {
   if (param == NULL)
     return;
@@ -627,39 +676,12 @@ static void on_accept(struct state *state, int accept_fd, interface_ref iface) {
   }
   for (uint64_t i = 0;; i++) {
     DEBUGF("[Socket-to-VMNET i=%lld] Receiving from the socket %d", i, accept_fd);
-    uint32_t header_be = 0;
-    ssize_t header_received = read_exact(accept_fd, &header_be, sizeof(header_be));
-    if (header_received < 0) {
-      ERRORN("read[header]");
+    size_t header = 0;
+    frame_read_status_t frame_status = read_frame(accept_fd, buf, buf_len, &header);
+    if (frame_status != FRAME_READ_OK)
       goto done;
-    }
-    if (header_received == 0) {
-      // EOF according to man page of read.
-      INFOF("Connection closed by peer (fd %d)", accept_fd);
-      goto done;
-    }
-    if ((size_t)header_received != sizeof(header_be)) {
-      ERRORF("Connection closed mid-frame header (fd %d, received %ld of %zu bytes)", accept_fd,
-             header_received, sizeof(header_be));
-      goto done;
-    }
-    uint32_t header = ntohl(header_be);
-    if (header == 0 || header > buf_len) {
-      ERRORF("Invalid frame size %u from fd %d (maximum %zu)", header, accept_fd, buf_len);
-      goto done;
-    }
-    ssize_t received = read_exact(accept_fd, buf, header);
-    if (received < 0) {
-      ERRORN("read[body]");
-      goto done;
-    }
-    if ((size_t)received != header) {
-      ERRORF("Connection closed mid-frame body (fd %d, received %ld of %u bytes)", accept_fd,
-             received, header);
-      goto done;
-    }
     DEBUGF("[Socket-to-VMNET i=%lld] Received from the socket %d: %ld bytes", i, accept_fd,
-           received);
+           header);
     struct iovec iov = {
         .iov_base = buf,
         .iov_len = header,
@@ -688,8 +710,9 @@ static void on_accept(struct state *state, int accept_fd, interface_ref iface) {
     for (struct conn *conn = conns; conn != NULL; conn = conn->next) {
       if (conn->socket_fd == accept_fd)
         continue;
+      uint32_t header_be = htonl((uint32_t)header);
       DEBUGF("[Socket-to-Socket i=%lld] Sending from socket %d to socket %d: "
-             "4 + %d bytes",
+             "4 + %zu bytes",
              i, accept_fd, conn->socket_fd, header);
       struct iovec iov[2] = {
           {
