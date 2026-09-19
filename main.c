@@ -53,6 +53,26 @@ static const char *vmnet_strerror(vmnet_return_t v) {
   }
 }
 
+// A Unix stream may return fewer bytes than requested without reaching EOF.
+// Keep reading until the framed protocol's requested field is complete, an
+// error occurs, or the peer closes the connection.
+static ssize_t read_exact(int fd, void *buf, size_t len) {
+  size_t offset = 0;
+  while (offset < len) {
+    ssize_t received = read(fd, (uint8_t *)buf + offset, len - offset);
+    if (received > 0) {
+      offset += (size_t)received;
+      continue;
+    }
+    if (received == 0)
+      break;
+    if (errno == EINTR)
+      continue;
+    return -1;
+  }
+  return (ssize_t)offset;
+}
+
 static void print_vmnet_start_param(xpc_object_t param) {
   if (param == NULL)
     return;
@@ -608,7 +628,7 @@ static void on_accept(struct state *state, int accept_fd, interface_ref iface) {
   for (uint64_t i = 0;; i++) {
     DEBUGF("[Socket-to-VMNET i=%lld] Receiving from the socket %d", i, accept_fd);
     uint32_t header_be = 0;
-    ssize_t header_received = read(accept_fd, &header_be, 4);
+    ssize_t header_received = read_exact(accept_fd, &header_be, 4);
     if (header_received < 0) {
       ERRORN("read[header]");
       goto done;
@@ -618,19 +638,26 @@ static void on_accept(struct state *state, int accept_fd, interface_ref iface) {
       INFOF("Connection closed by peer (fd %d)", accept_fd);
       goto done;
     }
+    if ((size_t)header_received != sizeof(header_be)) {
+      ERRORF("Connection closed mid-frame header (fd %d, received %ld of %zu bytes)", accept_fd,
+             header_received, sizeof(header_be));
+      goto done;
+    }
     uint32_t header = ntohl(header_be);
-    assert(header <= buf_len);
-    ssize_t received = read(accept_fd, buf, header);
+    if (header == 0 || header > buf_len) {
+      ERRORF("Invalid frame size %u from fd %d (maximum %zu)", header, accept_fd, buf_len);
+      goto done;
+    }
+    ssize_t received = read_exact(accept_fd, buf, header);
     if (received < 0) {
       ERRORN("read[body]");
       goto done;
     }
-    if (received == 0) {
-      // EOF according to man page of read.
-      INFOF("Connection closed by peer (fd %d)", accept_fd);
+    if ((size_t)received != header) {
+      ERRORF("Connection closed mid-frame body (fd %d, received %ld of %u bytes)", accept_fd,
+             received, header);
       goto done;
     }
-    assert(received == header);
     DEBUGF("[Socket-to-VMNET i=%lld] Received from the socket %d: %ld bytes", i, accept_fd,
            received);
     struct iovec iov = {
