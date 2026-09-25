@@ -628,7 +628,7 @@ static void on_accept(struct state *state, int accept_fd, interface_ref iface) {
   for (uint64_t i = 0;; i++) {
     DEBUGF("[Socket-to-VMNET i=%lld] Receiving from the socket %d", i, accept_fd);
     uint32_t header_be = 0;
-    ssize_t header_received = read_exact(accept_fd, &header_be, 4);
+    ssize_t header_received = read_exact(accept_fd, &header_be, sizeof(header_be));
     if (header_received < 0) {
       ERRORN("read[header]");
       goto done;
