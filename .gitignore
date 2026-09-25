@@ -2,6 +2,7 @@
 /socket_vmnet_client
 *.o
 /test/cli_mtu
+/test/cli_bus_path
 /test/frame_read
 /test/shmem_bus_smoke
 _artifacts*

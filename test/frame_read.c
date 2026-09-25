@@ -226,6 +226,12 @@ static void test_buffer_reuse_across_frames(void) {
   close(fds[1]);
 }
 
+static void test_existing_non_socket_is_not_unlinked(void) {
+  errno = 0;
+  CHECK(legacy_socket_path_preflight("/dev/null") < 0 && errno == EADDRINUSE,
+        "existing non-socket path rejected before bus startup");
+}
+
 int main(void) {
   test_complete_frame_in_one_write();
   test_header_and_body_split_writes();
@@ -238,6 +244,7 @@ int main(void) {
   test_oversized_frame_rejected();
   test_eintr_is_retried();
   test_buffer_reuse_across_frames();
+  test_existing_non_socket_is_not_unlinked();
   if (failures > 0) {
     fprintf(stderr, "%d failure(s)\n", failures);
     return 1;

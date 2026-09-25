@@ -436,6 +436,19 @@ err:
   return -1;
 }
 
+static int legacy_socket_path_preflight(const char *path) {
+  struct stat existing;
+  if (lstat(path, &existing) == 0) {
+    if (!S_ISSOCK(existing.st_mode)) {
+      errno = EADDRINUSE;
+      return -1;
+    }
+  } else if (errno != ENOENT) {
+    return -1;
+  }
+  return 0;
+}
+
 static void remove_pidfile(const char *pidfile) {
   if (unlink(pidfile) != 0) {
     ERRORF("Failed to remove pidfile: \"%s\": %s", pidfile, strerror(errno));
@@ -551,14 +564,6 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  DEBUGF("Opening socket \"%s\" (for UNIX group \"%s\")", cliopt->socket_path,
-         cliopt->socket_group);
-  listen_fd = socket_bindlisten(cliopt->socket_path, cliopt->socket_group);
-  if (listen_fd < 0) {
-    ERRORN("socket_bindlisten");
-    goto done;
-  }
-
   state.sem = dispatch_semaphore_create(1);
 
   // Queue for vm connections, allowing processing vms requests in parallel.
@@ -569,11 +574,30 @@ int main(int argc, char *argv[]) {
   state.host_queue =
       dispatch_queue_create("io.github.lima-vm.socket_vmnet.host", DISPATCH_QUEUE_SERIAL);
 
+  // Preserve the legacy bind failure (including Homebrew's /dev/null test)
+  // before opening the derived bus socket. Never let this daemon unlink a
+  // pre-existing non-socket file at the framed endpoint.
+  if (legacy_socket_path_preflight(cliopt->socket_path) < 0) {
+    ERRORN("bind");
+    goto done;
+  }
+
   if (cliopt->shmem_bus_listen_path != NULL &&
       shmem_bus_coordinator_open(&bus_coordinator, cliopt->shmem_bus_listen_path,
                                  cliopt->socket_group, (uint32_t)cliopt->shmem_bus_mtu) < 0) {
     ERRORF("shmem bus: could not start daemon-owned coordinator at %s: %s",
            cliopt->shmem_bus_listen_path, strerror(errno));
+    goto done;
+  }
+
+  // Lima waits for the legacy socket before attaching a VM. Publish it only
+  // after the derived bus socket is ready, so discovery does not mistake a
+  // still-starting product daemon for a legacy-only daemon and fall back.
+  DEBUGF("Opening socket \"%s\" (for UNIX group \"%s\")", cliopt->socket_path,
+         cliopt->socket_group);
+  listen_fd = socket_bindlisten(cliopt->socket_path, cliopt->socket_group);
+  if (listen_fd < 0) {
+    ERRORN("socket_bindlisten");
     goto done;
   }
 

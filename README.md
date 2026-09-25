@@ -320,19 +320,27 @@ See also https://github.com/lima-vm/lima/blob/master/docs/network.md
 
 ### Shared-memory bus (experimental)
 
-`--shmem-bus-listen=PATH` makes `socket_vmnet` own the shared-memory bus
-coordinator and join that bus as its vmnet uplink. Lima VZ guests configured
-with the same control path then exchange Ethernet payload through shared
-memory; the Unix socket at `PATH` carries only control-plane messages and file
-descriptors.
+This product build owns a shared-memory bus coordinator by default, on a
+separate socket derived from the legacy framed socket path. For example,
+`/private/var/run/lima/socket_vmnet.shared` produces
+`/private/var/run/lima/socket_vmnet_shm.shared`. The legacy socket retains its
+framed-stream protocol, while the derived socket carries only bus control
+messages and file descriptors. `--no-shmem-bus` disables the default bus for
+legacy-only operation. `--shmem-bus-listen=PATH` overrides the derived path.
+
+Lima VZ automatically discovers the derived socket for managed and explicit
+socket_vmnet attachments. Ethernet payload travels through shared memory,
+not over the control socket.
 
 ```console
 sudo socket_vmnet \
   --vmnet-mtu=9000 \
-  --shmem-bus-listen=/var/run/socket_vmnet.shmbus \
   /var/run/socket_vmnet
-LIMA_VZ_SHMEM_BUS_CONTROL=/var/run/socket_vmnet.shmbus limactl start default
 ```
+
+This daemon listens for bus control at `/var/run/socket_vmnet_shm` while
+keeping the framed listener at `/var/run/socket_vmnet`. A Lima VM using this
+socket needs a matching 9000-byte network MTU.
 
 In daemon-owned mode the coordinator publishes the effective vmnet MTU: 1500
 when `--vmnet-mtu` is omitted, otherwise the requested value. The optional

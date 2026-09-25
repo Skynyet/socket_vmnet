@@ -6,6 +6,7 @@
 
 #include <arpa/inet.h>
 #include <getopt.h>
+#include <sys/un.h>
 
 #include <Availability.h>
 #include <uuid/uuid.h>
@@ -76,6 +77,8 @@ static void print_usage(const char *argv0) {
          "                                    coordinator as the vmnet uplink\n");
   printf("--shmem-bus-listen=PATH             own the shared-memory bus coordinator\n"
          "                                    at PATH and join it as vmnet uplink\n");
+  printf("--no-shmem-bus                      disable the default daemon-owned bus\n"
+         "                                    (default path: SOCKET with _shm before its first dot)\n");
   printf("--shmem-bus-mtu=BYTES               coordinator MTU; must match vmnet MTU\n"
          "                                    (default: effective vmnet MTU)\n");
   printf("-p, --pidfile=PIDFILE               save pid to PIDFILE\n");
@@ -101,8 +104,40 @@ enum {
   CLI_OPT_VMNET_NETWORK_IDENTIFIER,
   CLI_OPT_SHMEM_BUS_CONTROL,
   CLI_OPT_SHMEM_BUS_LISTEN,
+  CLI_OPT_NO_SHMEM_BUS,
   CLI_OPT_SHMEM_BUS_MTU,
 };
+
+// The old framed listener remains at SOCKET. The bus gets a distinct Unix
+// socket beside it, with a per-network name when SOCKET has one: for example,
+// socket_vmnet.shared -> socket_vmnet_shm.shared. Lima builds that name from
+// its network configuration rather than parsing this string.
+static char *derived_bus_path(const char *socket_path) {
+  const char *base = strrchr(socket_path, '/');
+  base = base == NULL ? socket_path : base + 1;
+  if (*base == '\0') {
+    ERROR("SOCKET must end in a filename");
+    return NULL;
+  }
+  const char *dot = strchr(base, '.');
+  size_t original_len = strlen(socket_path);
+  size_t derived_len = original_len + sizeof("_shm") - 1;
+  if (derived_len >= sizeof(((struct sockaddr_un *)0)->sun_path)) {
+    ERRORF("derived shared-memory bus socket path is too long: %zu bytes", derived_len);
+    return NULL;
+  }
+  size_t head_len = dot == NULL ? original_len : (size_t)(dot - socket_path);
+  char *path = malloc(derived_len + 1);
+  if (path == NULL) {
+    ERRORN("malloc");
+    return NULL;
+  }
+  memcpy(path, socket_path, head_len);
+  memcpy(path + head_len, "_shm", sizeof("_shm") - 1);
+  memcpy(path + head_len + sizeof("_shm") - 1, socket_path + head_len,
+         original_len - head_len + 1);
+  return path;
+}
 
 static int parse_mtu(const char *name, const char *text, int *out) {
   errno = 0;
@@ -136,6 +171,7 @@ struct cli_options *cli_options_parse(int argc, char *argv[]) {
       {"vmnet-network-identifier", required_argument, NULL, CLI_OPT_VMNET_NETWORK_IDENTIFIER},
       {"shmem-bus-control",        required_argument, NULL, CLI_OPT_SHMEM_BUS_CONTROL       },
       {"shmem-bus-listen",         required_argument, NULL, CLI_OPT_SHMEM_BUS_LISTEN        },
+      {"no-shmem-bus",             no_argument,       NULL, CLI_OPT_NO_SHMEM_BUS            },
       {"shmem-bus-mtu",            required_argument, NULL, CLI_OPT_SHMEM_BUS_MTU           },
       {"pidfile",                  required_argument, NULL, 'p'                             },
       {"help",                     no_argument,       NULL, 'h'                             },
@@ -215,6 +251,9 @@ struct cli_options *cli_options_parse(int argc, char *argv[]) {
     case CLI_OPT_SHMEM_BUS_LISTEN:
       res->shmem_bus_listen_path = strdup(optarg);
       break;
+    case CLI_OPT_NO_SHMEM_BUS:
+      res->no_shmem_bus = 1;
+      break;
     case CLI_OPT_SHMEM_BUS_MTU:
       if (parse_mtu("--shmem-bus-mtu", optarg, &res->shmem_bus_mtu) < 0) { goto error; }
       break;
@@ -241,6 +280,21 @@ struct cli_options *cli_options_parse(int argc, char *argv[]) {
 
   if (res->shmem_bus_control_path != NULL && res->shmem_bus_listen_path != NULL) {
     ERROR("--shmem-bus-control and --shmem-bus-listen are mutually exclusive");
+    goto error;
+  }
+  if (res->no_shmem_bus &&
+      (res->shmem_bus_control_path != NULL || res->shmem_bus_listen_path != NULL)) {
+    ERROR("--no-shmem-bus conflicts with --shmem-bus-control/--shmem-bus-listen");
+    goto error;
+  }
+  if (!res->no_shmem_bus && res->shmem_bus_control_path == NULL &&
+      res->shmem_bus_listen_path == NULL) {
+    res->shmem_bus_listen_path = derived_bus_path(res->socket_path);
+    if (res->shmem_bus_listen_path == NULL) { goto error; }
+  }
+  if (res->shmem_bus_listen_path != NULL &&
+      strcmp(res->shmem_bus_listen_path, res->socket_path) == 0) {
+    ERROR("the bus control socket must differ from the legacy framed socket");
     goto error;
   }
   if (res->shmem_bus_mtu != 0 && res->shmem_bus_listen_path == NULL) {

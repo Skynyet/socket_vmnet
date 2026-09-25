@@ -76,6 +76,9 @@ test/shmem_bus_smoke: test/shmem_bus_smoke.c shmem_bus_coordinator.o $(SHMEM_BUS
 test/cli_mtu: test/cli_mtu.c cli.o
 	$(CC) $(CFLAGS) -I. -o $@ $(LDFLAGS) $(VMNET_LDFLAGS) $^
 
+test/cli_bus_path: test/cli_bus_path.c cli.o
+	$(CC) $(CFLAGS) -I. -o $@ $(LDFLAGS) $(VMNET_LDFLAGS) $^
+
 # Includes main.c directly to reach its static framed-ingress helpers, so
 # main.o must not be linked here (it would duplicate `bool debug`).
 test/frame_read: test/frame_read.c cli.o shmem_bus_coordinator.o shmem_bus_uplink.o $(SHMEM_BUS_CORE_OBJECTS)
@@ -88,6 +91,10 @@ test.frame-read: test/frame_read
 .PHONY: test.cli-mtu
 test.cli-mtu: test/cli_mtu
 	./test/cli_mtu
+
+.PHONY: test.cli-bus-path
+test.cli-bus-path: test/cli_bus_path
+	./test/cli_bus_path
 
 .PHONY: test.shmem-bus
 test.shmem-bus: test/shmem_bus_smoke
